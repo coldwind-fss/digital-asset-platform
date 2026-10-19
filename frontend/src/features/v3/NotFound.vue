@@ -1,0 +1,1 @@
+<template><section class="feishu-section p-8"><h1 class="text-xl font-semibold">页面不存在</h1><p class="my-3 text-sm text-gray-500">该地址可能已失效，请从资源清单重新查找。</p><RouterLink to="/resources" class="btn-primary">返回资源清单</RouterLink></section></template>

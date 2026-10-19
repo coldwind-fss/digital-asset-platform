@@ -1,0 +1,162 @@
+name: Digital Asset Platform contract checks
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "docs/项目基线/**"
+      - "docs/public/**"
+      - "README.md"
+      - "deploy/**"
+      - "scripts/**"
+      - ".github/workflows/digital-asset-platform-contract.yml"
+  push:
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "docs/项目基线/**"
+      - "docs/public/**"
+      - "README.md"
+      - "deploy/**"
+      - "scripts/**"
+      - ".github/workflows/digital-asset-platform-contract.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract-and-boundary-checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: digital_asset_platform_ci
+          POSTGRES_USER: digital_asset_platform_migrator
+          POSTGRES_PASSWORD: migration-test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U digital_asset_platform_migrator -d digital_asset_platform_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize isolated runtime role
+        run: |
+          docker exec -i ${{ job.services.postgres.id }} psql -v ON_ERROR_STOP=1 -U digital_asset_platform_migrator -d digital_asset_platform_ci <<'SQL'
+          CREATE ROLE digital_asset_platform_runtime LOGIN PASSWORD 'runtime-test-only';
+          REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+          GRANT USAGE ON SCHEMA public TO digital_asset_platform_runtime;
+          GRANT CONNECT ON DATABASE digital_asset_platform_ci TO digital_asset_platform_runtime;
+          ALTER DEFAULT PRIVILEGES FOR ROLE digital_asset_platform_migrator IN SCHEMA public
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO digital_asset_platform_runtime;
+          ALTER DEFAULT PRIVILEGES FOR ROLE digital_asset_platform_migrator IN SCHEMA public
+            GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO digital_asset_platform_runtime;
+          SQL
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install isolated backend dependencies
+        working-directory: backend
+        run: uv sync --locked --extra dev --python 3.12
+
+      - name: Reject a mismatched database name before migration
+        working-directory: backend
+        env:
+          APP_ENV: test
+          MIGRATOR_DATABASE_URL: postgresql+psycopg://digital_asset_platform_migrator:migration-test-only@localhost:5432/digital_asset_platform_ci
+          RUNTIME_DATABASE_USER: digital_asset_platform_runtime
+          EXPECTED_DATABASE: deliberately_wrong_digital_asset_platform_target
+          INSTANCE_ID: digital-asset-platform-ci-instance
+        run: |
+          if uv run alembic upgrade head; then
+            echo "Migration unexpectedly accepted a mismatched database name"
+            exit 1
+          fi
+
+      - name: Reject a runtime-role collision before DDL
+        working-directory: backend
+        env:
+          APP_ENV: test
+          MIGRATOR_DATABASE_URL: postgresql+psycopg://digital_asset_platform_migrator:migration-test-only@localhost:5432/digital_asset_platform_ci
+          RUNTIME_DATABASE_USER: digital_asset_platform_migrator
+          EXPECTED_DATABASE: digital_asset_platform_ci
+          INSTANCE_ID: digital-asset-platform-ci-instance
+          VERIFY_DATABASE_URL: postgresql+psycopg://digital_asset_platform_runtime:runtime-test-only@localhost:5432/digital_asset_platform_ci
+        run: |
+          if uv run alembic upgrade head; then
+            echo "Migration unexpectedly accepted a runtime/migration role collision"
+            exit 1
+          fi
+          uv run python scripts/assert_database_unmigrated.py
+
+      - name: Upgrade isolated PostgreSQL database
+        working-directory: backend
+        env:
+          APP_ENV: test
+          MIGRATOR_DATABASE_URL: postgresql+psycopg://digital_asset_platform_migrator:migration-test-only@localhost:5432/digital_asset_platform_ci
+          RUNTIME_DATABASE_USER: digital_asset_platform_runtime
+          EXPECTED_DATABASE: digital_asset_platform_ci
+          INSTANCE_ID: digital-asset-platform-ci-instance
+        run: uv run alembic upgrade head
+
+      - name: Verify migration is repeatable
+        working-directory: backend
+        env:
+          APP_ENV: test
+          MIGRATOR_DATABASE_URL: postgresql+psycopg://digital_asset_platform_migrator:migration-test-only@localhost:5432/digital_asset_platform_ci
+          RUNTIME_DATABASE_USER: digital_asset_platform_runtime
+          EXPECTED_DATABASE: digital_asset_platform_ci
+          INSTANCE_ID: digital-asset-platform-ci-instance
+        run: uv run alembic upgrade head
+
+      - name: Validate OpenAPI 3.1
+        working-directory: backend
+        run: uv run openapi-spec-validator openapi/v1.openapi.json
+
+      - name: Check module dependency boundaries
+        working-directory: backend
+        run: uv run python scripts/check_import_boundaries.py
+
+      - name: Run backend tests
+        working-directory: backend
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql+psycopg://digital_asset_platform_runtime:runtime-test-only@localhost:5432/digital_asset_platform_ci
+          MIGRATOR_DATABASE_URL: postgresql+psycopg://digital_asset_platform_migrator:migration-test-only@localhost:5432/digital_asset_platform_ci
+          RUNTIME_DATABASE_USER: digital_asset_platform_runtime
+          EXPECTED_DATABASE: digital_asset_platform_ci
+          INSTANCE_ID: digital-asset-platform-ci-instance
+          DAP_POSTGRES_TESTS: "1"
+          DAP_STAGE1_POSTGRES_TESTS: "1"
+          # Synthetic test key only; the CI database is disposable.
+          CREDENTIAL_MASTER_KEY: eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=
+        run: uv run pytest
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Check OpenAPI semantics and generated DTO drift
+        working-directory: frontend
+        run: |
+          npm run api:contract:check
+          npm run api:types:check
+          npm run typecheck
+
+      - name: Build production frontend
+        working-directory: frontend
+        run: npm run build

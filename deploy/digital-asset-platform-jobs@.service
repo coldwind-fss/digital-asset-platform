@@ -1,0 +1,22 @@
+[Unit]
+Description=Digital Asset Platform worker (%i)
+After=network-online.target postgresql.service
+
+[Service]
+User=dap-%i
+Group=dap-%i
+WorkingDirectory=/opt/digital-asset-platform/current/backend
+ExecStart=/opt/digital-asset-platform/venv/bin/python scripts/run_configured.py --config /etc/digital-asset-platform/%i/app.json python -m app.worker
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/digital-asset-platform/%i
+MemoryHigh=150M
+MemoryMax=250M
+
+[Install]
+WantedBy=multi-user.target

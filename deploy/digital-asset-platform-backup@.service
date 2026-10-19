@@ -1,0 +1,8 @@
+[Unit]
+Description=Digital Asset Platform consistent backup (%i)
+
+[Service]
+Type=oneshot
+UMask=0077
+WorkingDirectory=/opt/digital-asset-platform/current/backend
+ExecStart=/opt/digital-asset-platform/venv/bin/python /opt/digital-asset-platform/current/deploy/backup-instance.py --instance %i --quiesce

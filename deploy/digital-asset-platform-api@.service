@@ -1,0 +1,25 @@
+[Unit]
+Description=Digital Asset Platform API (%i)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=dap-%i
+Group=dap-%i
+WorkingDirectory=/opt/digital-asset-platform/current/backend
+ExecStart=/opt/digital-asset-platform/venv/bin/python scripts/run_configured.py --config /etc/digital-asset-platform/%i/app.json python -m uvicorn app.main:app --host 127.0.0.1 --port ${DAP_PORT} --proxy-headers --forwarded-allow-ips=127.0.0.1
+EnvironmentFile=/etc/digital-asset-platform/%i/service.env
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/digital-asset-platform/%i
+MemoryHigh=250M
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target

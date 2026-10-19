@@ -1,0 +1,3 @@
+* text=auto eol=lf
+*.png binary
+frontend/src/shared/api/generated.ts text eol=lf

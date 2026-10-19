@@ -1,0 +1,23 @@
+[Unit]
+Description=Digital Asset Platform scheduled jobs worker
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=digital-asset-platform
+Group=digital-asset-platform
+WorkingDirectory=/opt/digital-asset-platform/backend
+EnvironmentFile=/etc/digital-asset-platform/app.env
+ExecStart=/opt/digital-asset-platform/.venv/bin/python -m app.worker
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/digital-asset-platform/private-files
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

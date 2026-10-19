@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew Digital Asset Platform short-lived IP certificate
+After=network-online.target
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/opt/digital-asset-platform/tools/certbot/bin/certbot renew --quiet --config-dir /etc/digital-asset-platform/acme --work-dir /var/lib/digital-asset-platform/acme-work --logs-dir /var/log/digital-asset-platform-acme --deploy-hook "nginx -t && systemctl reload nginx"
